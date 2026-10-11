@@ -71,6 +71,8 @@ select.sort{background:var(--surface);border:1px solid var(--line);border-radius
 .foot{display:flex;justify-content:space-between;align-items:flex-end;margin-top:auto;padding-top:12px;gap:8px}
 .price{font-family:var(--display);font-size:22px;font-weight:600;color:var(--gold2);line-height:1}
 .price small{font-family:var(--sans);font-size:11px;color:var(--muted);margin-right:3px;font-weight:300}
+.price.ask{font-family:var(--serif);font-size:15px;font-weight:400;letter-spacing:.08em;line-height:1.5}
+.prices .price.ask{font-size:20px}
 .glass{font-size:12px;color:var(--muted);margin-top:3px}
 .add{border:1px solid var(--gold);color:var(--gold2);border-radius:999px;padding:6px 14px;font-size:13px;letter-spacing:.1em;transition:.2s;white-space:nowrap}
 .add:hover{background:var(--gold);color:#1c1a21}
@@ -213,6 +215,7 @@ const CONFIG = {
   FOOTER:  "未滿十八歲請勿飲酒　·　飲酒過量，有礙健康",
 
   CURRENCY: "NT$",
+  ASK_PRICE_TEXT: "價格請洽店員",        // 後台瓶價留空（或填 0）時，網站顯示的文字
   LOW_STOCK_AT: 2,                     // 庫存 ≤ 此數字時顯示「僅剩 N 瓶」
 
   // 傳給店員：填入 LINE 官方帳號 ID（例如 "@123abcde"），清單會直接傳到該帳號。
@@ -259,6 +262,13 @@ function thumb(item){
   return u ? `<img src="${esc(u)}" alt="${esc(item.name)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML=PH_HTML">` : PH;
 }
 window.PH_HTML = PH;
+const hasPrice = i => i.price > 0;
+const priceBlock = (i,label) => hasPrice(i)
+  ? `<div class="price"><small>${label}</small>${esc(fmt(i.price))}</div>`
+  : `<div class="price ask">${esc(CONFIG.ASK_PRICE_TEXT)}</div>`;
+const lineSum = x => hasPrice(x.it) ? x.q*x.it.price : 0;
+const totals = ls => ({ t: ls.reduce((a,x)=>a+lineSum(x),0), n: ls.reduce((a,x)=>a+x.q,0), u: ls.filter(x=>!hasPrice(x.it)).length });
+const totalText = (t,u) => (u && t===0) ? CONFIG.ASK_PRICE_TEXT : fmt(t) + (u ? " ＋" : "");
 
 /* CSV 解析（支援引號、換行、逗號） */
 function parseCSV(text){
@@ -340,8 +350,9 @@ function filtered(){
   let list=ITEMS.filter(i=>(state.cat==="全部"||i.cat===state.cat)
     && (!state.onlyStock||i.stock>0)
     && (!q || [i.name,i.en,i.origin,i.cat,i.desc,i.tag].join(" ").toLowerCase().includes(q)));
-  if(state.sort==="asc") list.sort((a,b)=>a.price-b.price);
-  else if(state.sort==="desc") list.sort((a,b)=>b.price-a.price);
+  const pr = (x,empty) => hasPrice(x) ? x.price : empty;
+  if(state.sort==="asc") list.sort((a,b)=>pr(a,Infinity)-pr(b,Infinity) || 0);
+  else if(state.sort==="desc") list.sort((a,b)=>pr(b,-Infinity)-pr(a,-Infinity) || 0);
   else list.sort((a,b)=>(b.stock>0)-(a.stock>0)); // 推薦：有現貨的排前面（其餘維持表格順序）
   return list;
 }
@@ -356,7 +367,7 @@ function renderGrid(){
       <div class="plate">${thumb(i)}${i.tag&&!sold?`<span class="badge">${esc(i.tag)}</span>`:""}${sold?`<div class="sold-tag">售罄</div>`:""}${low?`<span class="low">僅剩 ${i.stock} 瓶</span>`:""}</div>
       <div class="info">
         <h3>${esc(i.name)}</h3><div class="en">${esc(i.en)}</div><div class="spec">${esc(spec)}</div>
-        <div class="foot"><div><div class="price"><small>瓶</small>${esc(fmt(i.price))}</div>${i.glass>0?`<div class="glass">單杯 ${esc(fmt(i.glass))}</div>`:""}</div>
+        <div class="foot"><div>${priceBlock(i,"瓶")}${i.glass>0?`<div class="glass">單杯 ${esc(fmt(i.glass))}</div>`:""}</div>
         <button class="add" data-add="${esc(i.id)}" ${sold?"disabled":""}>${sold?"售罄":"＋ 加入"}</button></div>
       </div></div>`;
   }).join("");
@@ -375,7 +386,7 @@ function openModal(id){
       <h2 id="mName">${esc(i.name)}</h2><div class="en">${esc(i.en)}</div>
       <div class="facts">${[i.cat,i.origin,i.abv?i.abv+"% vol":"",i.ml?i.ml+" ml":""].filter(Boolean).map(x=>`<span>${esc(x)}</span>`).join("")}</div>
       <p class="desc">${esc(i.desc||"")}</p>
-      <div class="prices"><div class="price"><small>整瓶</small>${esc(fmt(i.price))}</div>${i.glass>0?`<div class="glass" style="font-size:14px">單杯 ${esc(fmt(i.glass))}</div>`:""}</div>
+      <div class="prices">${priceBlock(i,"整瓶")}${i.glass>0?`<div class="glass" style="font-size:14px">單杯 ${esc(fmt(i.glass))}</div>`:""}</div>
       ${!sold&&i.stock<=CONFIG.LOW_STOCK_AT?`<div style="color:var(--warn);font-size:13px;margin-bottom:8px">現貨僅剩 ${i.stock} 瓶</div>`:""}
       <div class="row">
         ${sold?`<button class="btn" disabled>目前售罄</button>`:`
@@ -403,27 +414,27 @@ function addToCart(id,n=1){
 }
 function cartLines(){ return Object.entries(cart).map(([id,q])=>({it:byId(id),q})).filter(x=>x.it&&x.q>0); }
 function renderCartBar(){
-  const ls=cartLines(), n=ls.reduce((a,x)=>a+x.q,0), t=ls.reduce((a,x)=>a+x.q*x.it.price,0);
-  $("#barCount").textContent=`${n} 瓶`; $("#barTotal").textContent=fmt(t);
+  const {t,n,u}=totals(cartLines());
+  $("#barCount").textContent=`${n} 瓶`; $("#barTotal").textContent=totalText(t,u);
   $("#bar").classList.toggle("on", n>0);
 }
 function renderDrawer(){
-  const ls=cartLines(), t=ls.reduce((a,x)=>a+x.q*x.it.price,0), n=ls.reduce((a,x)=>a+x.q,0);
+  const ls=cartLines(), {t,n,u}=totals(ls);
   $("#lines").innerHTML = ls.length ? ls.map(({it,q})=>`
     <div class="line"><div class="th">${thumb(it)}</div>
-      <div><b>${esc(it.name)}</b><small>${esc(fmt(it.price))} / 瓶</small>
+      <div><b>${esc(it.name)}</b><small>${hasPrice(it)?esc(fmt(it.price))+" / 瓶":esc(CONFIG.ASK_PRICE_TEXT)}</small>
         <div class="step" style="margin-top:6px"><button data-dec="${esc(it.id)}" aria-label="減少">−</button><output>${q}</output><button data-inc="${esc(it.id)}" aria-label="增加">＋</button></div></div>
-      <div class="sub">${esc(fmt(it.price*q))}</div></div>`).join("")
+      <div class="sub">${hasPrice(it)?esc(fmt(it.price*q)):"請洽店員"}</div></div>`).join("")
     : `<div class="empty-cart">還沒有挑選任何酒款</div>`;
-  $("#total").textContent=fmt(t); $("#totalMeta").textContent=`共 ${n} 瓶`;
+  $("#total").textContent=totalText(t,u); $("#totalMeta").textContent=`共 ${n} 瓶`+(u?`・${u} 款價格待確認`:"");
   $("#copy").disabled=$("#line").disabled=!ls.length;
 }
 function orderText(){
   const ls=cartLines(), note=$("#note").value.trim();
-  const t=ls.reduce((a,x)=>a+x.q*x.it.price,0);
+  const {t,u}=totals(ls);
   return [`【選酒清單】${note?"  "+note:""}`,
-    ...ls.map((x,k)=>`${k+1}. ${x.it.name} × ${x.q}　${fmt(x.it.price*x.q)}`),
-    `合計：${fmt(t)}`].join("\n");
+    ...ls.map((x,k)=>`${k+1}. ${x.it.name} × ${x.q}　${hasPrice(x.it)?fmt(x.it.price*x.q):CONFIG.ASK_PRICE_TEXT}`),
+    `合計：${t>0||!u?fmt(t):"—"}${u?`（另有 ${u} 款價格待確認）`:""}`].join("\n");
 }
 async function copyText(s){
   try{ await navigator.clipboard.writeText(s); return true; }
